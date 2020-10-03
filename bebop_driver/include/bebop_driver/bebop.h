@@ -40,6 +40,8 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSI
 #include <boost/thread/mutex.hpp>
 #include <boost/thread/condition_variable.hpp>
 
+#include "bebop_driver/bebop_video_decoder.h"
+
 extern "C"
 {
   #include "libARSAL/ARSAL.h"
@@ -152,6 +154,7 @@ public:
   // nothrow
   void Disconnect();
 
+  void SetDate(const std::string &date);
   void RequestAllSettings();
   void ResetAllSettings();
   void UpdateSettings(const bebop_driver::BebopArdrone3Config& config);
@@ -172,12 +175,14 @@ public:
   void MoveCamera(const double& tilt, const double& pan);
 
   void TakeSnapshot();
+  // exposure should be between -3.0 and +3.0
+  void SetExposure(const float& exposure);
   // true: start, false: stop
   void ToggleVideoRecording(const bool start);
 
   // This function is blocking and runs in the caller's thread's context
   // which is different from FrameReceivedCallback's context
-  bool GetFrontCameraFrame(std::vector<uint8_t>& buffer, uint32_t &width, uint32_t &height) const;
+  bool GetFrontCameraFrame(std::vector<uint8_t>& buffer, uint32_t &width, uint32_t &height, MetadataV2Base_t& meta_data) const;
   uint32_t GetFrontCameraFrameWidth() const;
   uint32_t GetFrontCameraFrameHeight() const;
 };
