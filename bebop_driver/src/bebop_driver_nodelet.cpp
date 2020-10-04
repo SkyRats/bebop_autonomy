@@ -169,6 +169,8 @@ void BebopDriverNodelet::onInit()
 
   camera_joint_pub_ = nh.advertise<sensor_msgs::JointState>("joint_states", 10, true);
   gps_fix_pub_ = nh.advertise<sensor_msgs::NavSatFix>("fix", 10, true);
+  gps_fix_pub2_ = nh.advertise<sensor_msgs::NavSatFix>("fix2", 10, true);
+
 
   cinfo_manager_ptr_.reset(new camera_info_manager::CameraInfoManager(nh, "bebop_front", param_camera_info_url));
   image_transport_ptr_.reset(new image_transport::ImageTransport(nh));
@@ -619,7 +621,7 @@ void BebopDriverNodelet::CameraPublisherThread()
 //-----------------------gps---------------------------------
 
       sensor_msgs::NavSatFix gps_msg;
-      gps_msg.header.frame_id = "/gps";
+      gps_msg.header.frame_id = "gps";
       gps_msg.status.status = sensor_msgs::NavSatStatus::STATUS_NO_FIX;
       gps_msg.status.service = sensor_msgs::NavSatStatus::SERVICE_GPS | sensor_msgs::NavSatStatus::SERVICE_GLONASS;
       gps_msg.position_covariance_type = sensor_msgs::NavSatFix::COVARIANCE_TYPE_UNKNOWN;
@@ -655,7 +657,7 @@ void BebopDriverNodelet::CameraPublisherThread()
       gps_msg.latitude = latitude;
       gps_msg.longitude = longitude;
       gps_msg.altitude = altitude;
-      gps_fix_pub_.publish(gps_msg);
+      gps_fix_pub2_.publish(gps_msg);
 
 
 //----------------wifi rssi ----------------------
@@ -894,8 +896,8 @@ void BebopDriverNodelet::AuxThread()
                                                static_cast<int8_t>(sensor_msgs::NavSatStatus::STATUS_NO_FIX);
         gps_msg.latitude = gps_state_ptr->latitude;
         gps_msg.longitude = gps_state_ptr->longitude;
-        gps_msg.altitude = gps_state_ptr->altitude;
-        // gps_fix_pub_.publish(gps_msg);
+        gps_msg.altitude = gps_s  tate_ptr->altitude;
+        gps_fix_pub_.publish(gps_msg);
         new_gps_state = false;
       }
 
