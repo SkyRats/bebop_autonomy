@@ -84,6 +84,36 @@ namespace bebop_driver
 
 const char* Bebop::LOG_TAG = "BebopSDK";
 
+
+/*
+ * @brief Set device to controller port. Function should be called before ARCONTROLLER_Device_t init.
+ * @warning Dirty hack.
+ * @param device_ptr_ Pointer to discovery device.
+ * @param _port Device to controller port.
+ * @return void. 
+ */
+void setD2CPort( ARDISCOVERY_Device_t* device_ptr_, const int _d2cport, const int _c2dport )
+{
+    // Define structure from ARDISCOVERY_DEVICE_Wifi.h
+    struct ARDISCOVERY_DEVICE_WIFI_t
+    {
+        char *address;
+        int discoveryPort;
+        int deviceToControllerPort;
+        ARDISCOVERY_Device_ConnectionJsonCallback_t sendJsonCallback;
+        ARDISCOVERY_Device_ConnectionJsonCallback_t receiveJsonCallback;
+        void *jsonCallbacksCustomData;
+        int controllerToDevicePort;
+        eARDISCOVERY_ERROR connectionStatus;
+    };
+
+    // Manually set device to controller port.
+    static_cast<ARDISCOVERY_DEVICE_WIFI_t*>(device_ptr_->specificParameters)->deviceToControllerPort = _d2cport;
+    static_cast<ARDISCOVERY_DEVICE_WIFI_t*>(device_ptr_->specificParameters)->controllerToDevicePort = _c2dport;
+
+}
+
+
 void Bebop::StateChangedCallback(eARCONTROLLER_DEVICE_STATE new_state, eARCONTROLLER_ERROR error, void *bebop_void_ptr)
 {
   // TODO(mani-monaj): Log error
@@ -232,7 +262,7 @@ Bebop::~Bebop()
   if (device_controller_ptr_) ARCONTROLLER_Device_Delete(&device_controller_ptr_);
 }
 
-void Bebop::Connect(ros::NodeHandle& nh, ros::NodeHandle& priv_nh, const std::string& bebop_ip)
+void Bebop::Connect(ros::NodeHandle& nh, ros::NodeHandle& priv_nh, const std::string& bebop_ip, const int bebop_discovery_port, const int bebop_d2c_port, const int bebop_c2d_port)
 {
   try
   {
@@ -252,15 +282,35 @@ void Bebop::Connect(ros::NodeHandle& nh, ros::NodeHandle& priv_nh, const std::st
     // set/save ip
     bebop_ip_ = bebop_ip;
 
+    // Set/save discovery port.
+    bebop_discovery_port_ = bebop_discovery_port;
+
+    // Set/save d2c port.
+    bebop_d2c_port_ = bebop_d2c_port;
+    bebop_c2d_port_ =  bebop_c2d_port;
+
     // TODO(mani-monaj): Make ip and port params
     error_discovery = ARDISCOVERY_Device_InitWifi(device_ptr_,
                                                   ARDISCOVERY_PRODUCT_ARDRONE, "Bebop",
-                                                  bebop_ip_.c_str(), 44444);
+                                                  bebop_ip_.c_str(), bebop_discovery_port_);
+                                                  // bebop_ip_.c_str(), 44444);
 
     if (error_discovery != ARDISCOVERY_OK)
     {
       throw std::runtime_error("Discovery failed: " + std::string(ARDISCOVERY_Error_ToString(error_discovery)));
     }
+
+
+    // Set device to controller port.
+    error_discovery =  ARDISCOVERY_Device_WifiSetDeviceToControllerPort(device_ptr_, bebop_d2c_port);
+    if (error_discovery != ARDISCOVERY_OK)
+    {
+      throw std::runtime_error("Set d2c port failed: " + std::string(ARDISCOVERY_Error_ToString(error_discovery)));
+    } else {
+      ARSAL_PRINT(ARSAL_PRINT_INFO, LOG_TAG, "\nd2c Port CHANGED!!!\n");
+    }
+    setD2CPort( device_ptr_, bebop_d2c_port, bebop_c2d_port );
+
 
     device_controller_ptr_ = ARCONTROLLER_Device_New(device_ptr_, &error_);
     ThrowOnCtrlError(error_, "Creation of device controller failed: ");

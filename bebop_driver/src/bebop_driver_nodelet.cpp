@@ -105,6 +105,10 @@ void BebopDriverNodelet::onInit()
   const bool param_sync_time = private_nh.param("sync_time", false);
   const std::string& param_camera_info_url = private_nh.param<std::string>("camera_info_url", "");
   const std::string& param_bebop_ip = private_nh.param<std::string>("bebop_ip", "192.168.42.1");
+  const int param_bebop_discovery_port = private_nh.param<int>("bebop_discovery_port", 44444);
+  const int param_bebop_d2c_port = private_nh.param<int>("bebop_d2c_port", 43217);  
+  const int param_bebop_c2d_port = private_nh.param<int>("bebop_c2d_port", 54321);  
+
 
   param_camera_frame_id_ = private_nh.param<std::string>("camera_frame_id", "camera_optical");
   param_odom_frame_id_ = private_nh.param<std::string>("odom_frame_id", "odom");
@@ -114,7 +118,12 @@ void BebopDriverNodelet::onInit()
   NODELET_INFO("Connecting to Bebop ...");
   try
   {
-    bebop_ptr_->Connect(nh, private_nh, param_bebop_ip);
+    NODELET_INFO( "      Bebop ip: %s", param_bebop_ip.c_str() );
+    NODELET_INFO( "Discovery port: %i", param_bebop_discovery_port );
+    NODELET_INFO( "      d2c port: %i", param_bebop_d2c_port );
+    NODELET_INFO( "      c2d port: %i", param_bebop_c2d_port );
+
+    bebop_ptr_->Connect(nh, private_nh, param_bebop_ip, param_bebop_discovery_port, param_bebop_d2c_port, param_bebop_c2d_port);
 
     if (param_reset_settings)
     {
@@ -164,6 +173,8 @@ void BebopDriverNodelet::onInit()
   velocities_pub_ = nh.advertise<geometry_msgs::Vector3>("velocities", 10, true);
   velocities_global_pub_ = nh.advertise<geometry_msgs::Vector3>("velocities_global", 10, true);
   odom_global_pub_ = nh.advertise<nav_msgs::Odometry>("odom_global", 10);
+  odom_global_enu_pub_ = nh.advertise<nav_msgs::Odometry>("odom_global_enu", 10);
+
 
 
 
@@ -469,6 +480,17 @@ void BebopDriverNodelet::CameraPublisherThread()
   tf2_ros::TransformBroadcaster tf_broad;
   tf2::Vector3 base_pose(0.0, 0.0, 0.0);
   tf2::Quaternion odom_to_base_rot_q;
+
+  geometry_msgs::TransformStamped odom_to_base_tf_enu;
+  odom_to_base_tf_enu.header.frame_id = param_odom_frame_id_;
+  odom_to_base_tf_enu.child_frame_id = "base_link";
+  tf2::Vector3 base_pose_enu(0.0, 0.0, 0.0);
+  tf2::Quaternion odom_to_base_rot_q_enu;
+
+  double last_latitude = 500;
+  double last_longitude = 500;
+  double last_battery_percentage = 100.0;
+
   ros::Time last_odom_time(ros::Time::now());
 
   NODELET_INFO_STREAM("[CameraThread] thread lwp_id: " << util::GetLWPId());
@@ -609,55 +631,94 @@ void BebopDriverNodelet::CameraPublisherThread()
         odom_msg_ptr->pose.pose.orientation.z = q_z;
         odom_global_pub_.publish(odom_msg_ptr);
         tf2::convert(odom_msg_ptr->pose.pose.orientation, odom_to_base_rot_q);
-
         // if (param_publish_odom_tf_)
         //   {
             odom_to_base_tf.header.stamp = t_now;
             tf2::convert(tf2::Transform(odom_to_base_rot_q, base_pose), odom_to_base_tf.transform);
             tf_broad.sendTransform(odom_to_base_tf);
           // }
+
+
+        base_pose_enu += tf2::Vector3( east_speed * dt, north_speed * dt, -down_speed * dt);
+        nav_msgs::OdometryPtr odom_msg_ptr_enu(new nav_msgs::Odometry());
+        odom_msg_ptr_enu->header.stamp = t_now;
+        odom_msg_ptr_enu->header.frame_id = param_odom_frame_id_;
+        odom_msg_ptr_enu->child_frame_id = "base_link_enu";
+        odom_msg_ptr_enu->twist.twist.linear.x = east_speed;
+        odom_msg_ptr_enu->twist.twist.linear.y = north_speed;
+        odom_msg_ptr_enu->twist.twist.linear.z = -down_speed;
+        // odom_msg_ptr_enu->twist.twist.angular.x = north_speed;
+        // odom_msg_ptr_enu->twist.twist.angular.y = east_speed;
+        // odom_msg_ptr_enu->twist.twist.angular.z = down_speed;
+        // TODO(mani-monaj): Optimize this
+        odom_msg_ptr_enu->pose.pose.position.x = base_pose_enu.x();
+        odom_msg_ptr_enu->pose.pose.position.y = base_pose_enu.y();
+        odom_msg_ptr_enu->pose.pose.position.z = base_pose_enu.z();
+        odom_msg_ptr_enu->pose.pose.orientation.w = q_w;
+        odom_msg_ptr_enu->pose.pose.orientation.x = q_y;
+        odom_msg_ptr_enu->pose.pose.orientation.y = q_x;
+        odom_msg_ptr_enu->pose.pose.orientation.z = -q_z;
+        // gps_msg.pose.covariance = {0.01, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 1000.0};
+        odom_global_enu_pub_.publish(odom_msg_ptr_enu);
+        tf2::convert(odom_msg_ptr_enu->pose.pose.orientation, odom_to_base_rot_q_enu);
+        // if (param_publish_odom_tf_)
+        //   {
+            odom_to_base_tf_enu.header.stamp = t_now;
+            tf2::convert(tf2::Transform(odom_to_base_rot_q_enu, base_pose_enu), odom_to_base_tf_enu.transform);
+            tf_broad.sendTransform(odom_to_base_tf_enu);
+          // }
       }
+      std::cout<< "z odom global: "<< base_pose_enu.z() <<std::endl;
+
       last_odom_time = ros::Time::now();
 //-----------------------gps---------------------------------
 
-      sensor_msgs::NavSatFix gps_msg;
-      gps_msg.header.frame_id = "gps";
-      gps_msg.status.status = sensor_msgs::NavSatStatus::STATUS_NO_FIX;
-      gps_msg.status.service = sensor_msgs::NavSatStatus::SERVICE_GPS | sensor_msgs::NavSatStatus::SERVICE_GLONASS;
-      gps_msg.position_covariance_type = sensor_msgs::NavSatFix::COVARIANCE_TYPE_UNKNOWN;
-
       int32_t gps_altitude_and_sv_count = ntohl(meta_data.altitudeAndSv);
+      // int32_t gps_altitude = (double)((gps_altitude_and_sv_count & 0xffffff00) >> 8)/(1<<8);
       int32_t gps_altitude = (gps_altitude_and_sv_count & 0xffffff00) >> 8;
+
       uint8_t state = ntohs(meta_data.state) & 0x7f;
       uint8_t mode = ntohs(meta_data.mode) & 0x7f;
       uint8_t binning = (state & 0x80) >> 7;
       uint8_t sv_count = gps_altitude_and_sv_count & 0xff;
 
-
+      double altitude = (double)gps_altitude /(1<<8);
       double latitude = read_fixed_point_i32(meta_data.latitude,22);
       double longitude =read_fixed_point_i32(meta_data.longitude,22);
-      double altitude = read_fixed_point_i32(meta_data.groundDistance,22);
+      double ground_dist = ((float)(ntohl(meta_data.groundDistance)))/(65536.0);
+      std::cout<< "ground dist: "<<ground_dist<<" m  raw: "<< ntohl(meta_data.groundDistance) << " m" <<std::endl;
+ 
+      // double ground_dist = read_fixed_point_i32(meta_data.groundDistance,16);
+
       
       bool is_valid_gps = (fabs(latitude - 500.0) > util::eps) &&
-            (fabs(longitude - 500.0) > util::eps) &&
-            (fabs(altitude - 500.0) > util::eps);
+            (fabs(longitude - 500.0) > util::eps) && (longitude != 0.0) &&
+            (fabs(altitude - 500.0) > util::eps) && (latitude != 0.0);
       
-      std::cout<< "grond dist :"<<altitude<<std::endl;
-      
-      if(is_valid_gps){
-        std::cout<< " ------gps------"<<std::endl;
-        std::cout<< "lat"<<latitude<<std::endl;
-        std::cout<<"lon:" <<longitude<<std::endl;
-        std::cout<< "alt:"<<gps_altitude<<std::endl;
+      if((latitude != last_latitude || longitude != last_longitude) && is_valid_gps){
+        sensor_msgs::NavSatFix gps_msg;
+        gps_msg.header.frame_id = "gps";
+        gps_msg.status.status = sensor_msgs::NavSatStatus::STATUS_NO_FIX;
+        gps_msg.status.service = sensor_msgs::NavSatStatus::SERVICE_GPS | sensor_msgs::NavSatStatus::SERVICE_GLONASS;
+        gps_msg.position_covariance_type = sensor_msgs::NavSatFix::COVARIANCE_TYPE_UNKNOWN;
+        gps_msg.header.stamp = t_now;
+        gps_msg.status.status= state;
+        // gps_msg.status.status = is_valid_gps ? static_cast<int8_t>(sensor_msgs::NavSatStatus::STATUS_FIX):
+        //                                         static_cast<int8_t>(sensor_msgs::NavSatStatus::STATUS_NO_FIX);
+        gps_msg.latitude = latitude;
+        gps_msg.longitude = longitude;
+        gps_msg.altitude = 0.0;//altitude;
+        gps_msg.position_covariance = {0.0001, 0.0, 0.0, 0.0, 0.0001, 0.0, 0.0, 0.0, 1000.0};
+
+        gps_fix_pub2_.publish(gps_msg);
+
+        // std::cout<< " ------gps------"<<std::endl;
+        // std::cout<< "lat"<<latitude<<std::endl;
+        // std::cout<<"lon:" <<longitude<<std::endl;
+        // std::cout<< "alt:"<<altitude<<std::endl;
       }
-      gps_msg.header.stamp = t_now;
-      gps_msg.status.status= state;
-      // gps_msg.status.status = is_valid_gps ? static_cast<int8_t>(sensor_msgs::NavSatStatus::STATUS_FIX):
-      //                                         static_cast<int8_t>(sensor_msgs::NavSatStatus::STATUS_NO_FIX);
-      gps_msg.latitude = latitude;
-      gps_msg.longitude = longitude;
-      gps_msg.altitude = altitude;
-      gps_fix_pub2_.publish(gps_msg);
+      last_latitude = latitude;
+      last_longitude = longitude;
 
 
 //----------------wifi rssi ----------------------
@@ -668,6 +729,12 @@ double wifi_rssi = meta_data.wifiRssi;
       }
 //------------------battery ----------------------
 double battery_percentage = meta_data.batteryPercentage;
+
+      if(last_battery_percentage!=battery_percentage){
+        std::cout<< "bat:"<<battery_percentage<<"% "<<std::endl;
+      }
+      last_battery_percentage = battery_percentage;
+
       if (battery_percentage < 10){
         std::cout<< "CAUTION!!! bat:"<<battery_percentage<<"% "<<std::endl;
       }
@@ -896,7 +963,7 @@ void BebopDriverNodelet::AuxThread()
                                                static_cast<int8_t>(sensor_msgs::NavSatStatus::STATUS_NO_FIX);
         gps_msg.latitude = gps_state_ptr->latitude;
         gps_msg.longitude = gps_state_ptr->longitude;
-        gps_msg.altitude = gps_s  tate_ptr->altitude;
+        gps_msg.altitude = gps_state_ptr->altitude;
         gps_fix_pub_.publish(gps_msg);
         new_gps_state = false;
       }

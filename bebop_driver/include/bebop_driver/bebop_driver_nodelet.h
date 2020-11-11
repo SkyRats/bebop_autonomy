@@ -130,6 +130,8 @@ private:
   ros::Publisher velocities_pub_;
   ros::Publisher velocities_global_pub_;
   ros::Publisher odom_global_pub_;
+  ros::Publisher odom_global_enu_pub_;
+
 
 
 
